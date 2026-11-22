@@ -8,3 +8,7 @@
 *.yaml text eol=lf
 *.json text eol=lf
 backend/venv/** -text
+backend/tests/fixtures/** binary
+*.pdf binary
+*.xlsx binary
+*.zip binary

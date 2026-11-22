@@ -1,0 +1,62 @@
+{
+  "company": {
+    "ticker": "BBCA",
+    "name": "PT Bank Central Asia Tbk.",
+    "source_company_id": "AA331",
+    "accounting_standard": "PSAK",
+    "reporting_basis_default": "consolidated",
+    "sector": "G. Financials",
+    "subsector": "G1. Banks",
+    "currency": "IDR"
+  },
+  "period": {
+    "fiscal_year": 2025,
+    "source_period_code": "audit",
+    "label": "FY2025",
+    "instant_date": "2025-12-31",
+    "start_date": "2025-01-01",
+    "end_date": "2025-12-31"
+  },
+  "attachments": [
+    {
+      "file_name": "instance.zip",
+      "file_type": ".zip",
+      "file_role": "instance_xbrl",
+      "source_file_id": "bbca-2025-instance",
+      "source_document_id": "bbca-fy2025-audit-fixture",
+      "file_size": 81797,
+      "sha256": "6a127d5f2785945a71d3a0d7007188f618e7bde5f0728a24224b36bddc9e6f81",
+      "source_path": "/Portals/0/StaticData/ListedCompanies/Corporate_Actions/New_Info_JSX/Jenis_Informasi/01_Laporan_Keuangan/02_Soft_Copy_Laporan_Keuangan//Laporan Keuangan Tahun 2025/Audit/BBCA/instance.zip"
+    },
+    {
+      "file_name": "inlineXBRL.zip",
+      "file_type": ".zip",
+      "file_role": "inline_xbrl",
+      "source_file_id": "bbca-2025-inline-xbrl",
+      "source_document_id": "bbca-fy2025-audit-fixture",
+      "file_size": 176712,
+      "sha256": "31663ea3b3a49050897b0c872001ba8044f643680803ff16f617e28be59f560e",
+      "source_path": "/Portals/0/StaticData/ListedCompanies/Corporate_Actions/New_Info_JSX/Jenis_Informasi/01_Laporan_Keuangan/02_Soft_Copy_Laporan_Keuangan//Laporan Keuangan Tahun 2025/Audit/BBCA/inlineXBRL.zip"
+    },
+    {
+      "file_name": "FinancialStatement-2025-Tahunan-BBCA.xlsx",
+      "file_type": ".xlsx",
+      "file_role": "spreadsheet",
+      "source_file_id": "bbca-2025-spreadsheet",
+      "source_document_id": "bbca-fy2025-audit-fixture",
+      "file_size": 306452,
+      "sha256": "fd40bff7eaf84b6dcff5452eb19c3d0616682bca2329a7a19680eb546da2d9df",
+      "source_path": "/Portals/0/StaticData/ListedCompanies/Corporate_Actions/New_Info_JSX/Jenis_Informasi/01_Laporan_Keuangan/02_Soft_Copy_Laporan_Keuangan//Laporan Keuangan Tahun 2025/Audit/BBCA/FinancialStatement-2025-Tahunan-BBCA.xlsx"
+    },
+    {
+      "file_name": "FinancialStatement-2025-Tahunan-BBCA.pdf",
+      "file_type": ".pdf",
+      "file_role": "pdf",
+      "source_file_id": "bbca-2025-pdf",
+      "source_document_id": "bbca-fy2025-audit-fixture",
+      "file_size": 497148,
+      "sha256": "85c9cee7167e64dc418af6d672a5905cdcd4038603919d5bdd88680396e3e17d",
+      "source_path": "/Portals/0/StaticData/ListedCompanies/Corporate_Actions/New_Info_JSX/Jenis_Informasi/01_Laporan_Keuangan/02_Soft_Copy_Laporan_Keuangan//Laporan Keuangan Tahun 2025/Audit/BBCA/FinancialStatement-2025-Tahunan-BBCA.pdf"
+    }
+  ]
+}
