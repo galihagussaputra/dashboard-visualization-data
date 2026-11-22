@@ -2,52 +2,51 @@ import React, { useEffect, useRef, useState } from "react";
 import * as d3 from 'd3';
 import { BarChart3, DollarSign, Download, Filter, TrendingUp, Users } from "lucide-react";
 
+const rawData = {
+    revenue: [
+        { month: 'Jan', value: 125000000, category: 'Produk A' },
+        { month: 'Feb', value: 145000000, category: 'Produk A' },
+        { month: 'Mar', value: 165000000, category: 'Produk A' },
+        { month: 'Apr', value: 155000000, category: 'Produk A' },
+        { month: 'May', value: 185000000, category: 'Produk A' },
+        { month: 'Jun', value: 195000000, category: 'Produk A' },
+        { month: 'Jul', value: 205000000, category: 'Produk A' },
+        { month: 'Aug', value: 215000000, category: 'Produk A' },
+        { month: 'Sep', value: 225000000, category: 'Produk A' },
+        { month: 'Oct', value: 235000000, category: 'Produk A' },
+        { month: 'Nov', value: 245000000, category: 'Produk A' },
+        { month: 'Dec', value: 265000000, category: 'Produk A' },
+    ],
+    customers: [
+        { month: 'Jan', value: 1250 },
+        { month: 'Feb', value: 1450 },
+        { month: 'Mar', value: 1650 },
+        { month: 'Apr', value: 1550 },
+        { month: 'May', value: 1850 },
+        { month: 'Jun', value: 1950 },
+        { month: 'Jul', value: 2050 },
+        { month: 'Aug', value: 2150 },
+        { month: 'Sep', value: 2250 },
+        { month: 'Oct', value: 2350 },
+        { month: 'Nov', value: 2450 },
+        { month: 'Dec', value: 2650 },
+    ],
+    categoryDistribution: [
+        { category: 'Produk A', value: 450000000 },
+        { category: 'Produk B', value: 380000000 },
+        { category: 'Produk C', value: 290000000 },
+        { category: 'Produk D', value: 210000000 },
+        { category: 'Produk E', value: 170000000 },
+    ]
+};
+
 const DataVisualizationDahsboard = () => {
     const [selectedYear, setSelectedYear] = useState('2025');
     const [selectedCategory, setSelectedCategory] = useState('all');
-    const [selectedChart, setSelectedChart] = useState('revenue');
 
     const barChartRef = useRef(null);
     const lineChartRef = useRef(null);
     const pieChartRef = useRef(null);
-
-    const rawData = {
-        revenue: [
-            { month: 'Jan', value: 125000000, category: 'Produk A' },
-            { month: 'Feb', value: 145000000, category: 'Produk A' },
-            { month: 'Mar', value: 165000000, category: 'Produk A' },
-            { month: 'Apr', value: 155000000, category: 'Produk A' },
-            { month: 'May', value: 185000000, category: 'Produk A' },
-            { month: 'Jun', value: 195000000, category: 'Produk A' },
-            { month: 'Jul', value: 205000000, category: 'Produk A' },
-            { month: 'Aug', value: 215000000, category: 'Produk A' },
-            { month: 'Sep', value: 225000000, category: 'Produk A' },
-            { month: 'Oct', value: 235000000, category: 'Produk A' },
-            { month: 'Nov', value: 245000000, category: 'Produk A' },
-            { month: 'Dec', value: 265000000, category: 'Produk A' }, 
-        ],
-        customers: [
-            { month: 'Jan', value: 1250 },
-            { month: 'Feb', value: 1450 },
-            { month: 'Mar', value: 1650 },
-            { month: 'Apr', value: 1550 },
-            { month: 'May', value: 1850 },
-            { month: 'Jun', value: 1950 },
-            { month: 'Jul', value: 2050 },
-            { month: 'Aug', value: 2150 },
-            { month: 'Sep', value: 2250 },
-            { month: 'Oct', value: 2350 },
-            { month: 'Nov', value: 2450 },
-            { month: 'Dec', value: 2650 },
-        ],
-        categoryDistribution: [
-            { category: 'Produk A', value: 450000000 },
-            { category: 'Produk B', value: 380000000 },
-            { category: 'Produk C', value: 290000000 },
-            { category: 'Produk D', value: 210000000 },
-            { category: 'Produk E', value: 170000000 },
-        ]
-    };
 
     const formatRupiah = (value) => {
         return new Intl.NumberFormat('id-ID', {
@@ -113,7 +112,7 @@ const DataVisualizationDahsboard = () => {
         svg.selectAll('.bar')
             .data(data)
             .enter()
-            .append('react')
+            .append('rect')
             .attr('class', 'bar')
             .attr('x', d => x(d.month))
             .attr('y', height)
@@ -152,7 +151,7 @@ const DataVisualizationDahsboard = () => {
 
         d3.select(lineChartRef.current).selectAll('*').remove();
 
-        const svg = d3.select(d3.lineChartRef.current)
+        const svg = d3.select(lineChartRef.current)
             .append('svg')
             .attr('width', width + margin.left + margin.right)
             .attr('height', height + margin.top + margin.bottom)
@@ -266,14 +265,14 @@ const DataVisualizationDahsboard = () => {
             .attr('stroke', 'white')
             .attr('stroke-width', 2)
             .style('opacity', 0.9)
-            .on('mouseover', function(event, d){
+            .on('mouseover', function(){
                 d3.select(this)
                     .transition()
                     .duration(200)
                     .attr('d', arcHover)
                     .style('opacity', 1);
             })
-            .on('mouseout', function(event, d){
+            .on('mouseout', function(){
                 d3.select(this)
                     .transition()
                     .duration(200)
@@ -314,12 +313,12 @@ const DataVisualizationDahsboard = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 to-scale-100 p-6">
+        <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
             <div className="max-w-7xl mx-auto">
                 {/* Header */}
                 <div className="mb-8">
-                    <h1 className="text-4xl font-bold text-slate-800 mb-2">Data Visualization Dashboard</h1>
-                    <p className="text-slate-600">Analisis data bisnis real-time dengan visualisasi interaktif</p>
+                    <h1 className="text-4xl font-bold text-slate-800 mb-2">Legacy Demo Dashboard</h1>
+                    <p className="text-slate-600">Synthetic demo data — not financial information</p>
                 </div>
                 
                 {/* Filter */}
@@ -433,7 +432,7 @@ const DataVisualizationDahsboard = () => {
                                 {rawData.categoryDistribution.map((item, index) => (
                                     <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                                         <div className="flex items-center gap-3">
-                                            <div className={`w-4 h-4 ronded-full`} 
+                                            <div className={`w-4 h-4 rounded-full`}
                                                 style={{ backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index] }}>
                                             </div>
                                             <span className="font-medium text-slate-700">{item.category}</span>
@@ -448,7 +447,7 @@ const DataVisualizationDahsboard = () => {
 
                 {/* Footer */}
                 <div className="mt-8 text-center text-slate-600 text-sm">
-                    <p>Dashboard diperbarui secara real-time • Data dari FastAPI Backend</p>
+                    <p>Legacy demo data only. Use the IDX Financial Intelligence modules for published financial data.</p>
                 </div>
             </div>
         </div>
