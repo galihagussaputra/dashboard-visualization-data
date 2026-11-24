@@ -22,7 +22,8 @@ docker compose exec api alembic history
 | `backend/tests/test_m1_api.py` | M1 catalog, document, statement, and job APIs. |
 | `backend/tests/test_m2_account_mapping.py` | Exact taxonomy, source name preservation, unknown/ambiguous handling, industry isolation, taxonomy specificity, rule versioning, rejected rules. |
 | `backend/tests/test_m2_periods.py` | Instant/duration classification, all supported quarter derivations, missing inputs, basis/currency/unit/scale guards, restatement review, duplicate context, negative values, fiscal-year mismatch. |
-| `backend/tests/test_m2_metrics.py` | Average-balance ratios, direct ratios, inventory turnover, free cash flow, zero denominators, missing inputs, negative values, incompatible period/basis/unit, formula version, timestamp behavior. |
+| `backend/tests/test_m2_metrics.py` | Average-balance ratios, direct ratios, inventory turnover, free cash flow, zero denominators, missing inputs, negative values, incompatible period/basis/unit, non-finite input, source scale, role period kind, explicit capex sign convention, average window, formula version, timestamp behavior. |
+| `backend/tests/test_m2_metric_runtime.py` | Isolated transactional end-to-end input path for all 11 `m2-v1` metrics from normalized facts through approved mappings, role-aware opening/closing selection, computation, and persisted input references. |
 | `backend/tests/test_m2_api.py` | Auth requirement, login/current user, statement provenance, validation workflow statuses, publisher role enforcement. |
 
 ## Final results
@@ -30,7 +31,7 @@ docker compose exec api alembic history
 | Check | Result |
 | --- | --- |
 | `ruff check .` | Pass |
-| `python -m pytest -q` | `53 passed, 5 warnings` |
+| `python -m pytest -q` | `59 passed, 5 warnings` after R1 |
 | `npm run lint` | Pass; no errors or warnings |
 | `npm run build` | Pass; Vite production bundle generated |
 | `alembic current` | `d4e7b9c1a2f3 (head)` |

@@ -9,6 +9,31 @@ from app.models import FinancialMetric, FinancialMetricInput, MetricDefinition
 
 from .definitions import FORMULA_VERSION, METRIC_SPECS, METRICS_BY_CODE, MetricSpec
 
+INSTANT_INPUT_ROLES = {
+    "TOTAL_ASSETS",
+    "TOTAL_EQUITY",
+    "CURRENT_ASSETS",
+    "CURRENT_LIABILITIES",
+    "QUICK_ASSETS",
+    "TOTAL_DEBT",
+    "TOTAL_LIABILITIES",
+    "INVENTORY",
+    "OPENING_TOTAL_ASSETS",
+    "OPENING_EQUITY",
+    "OPENING_INVENTORY",
+    "CLOSING_TOTAL_ASSETS",
+    "CLOSING_EQUITY",
+    "CLOSING_INVENTORY",
+}
+
+DURATION_INPUT_ROLES = {
+    "NET_INCOME",
+    "REVENUE",
+    "COST_OF_GOODS_SOLD",
+    "OPERATING_CASH_FLOW",
+    "CAPITAL_EXPENDITURE",
+}
+
 
 @dataclass(frozen=True)
 class MetricInput:
@@ -28,6 +53,7 @@ class MetricInput:
     derived_value_id: int | None = None
     document_version: int | None = None
     validation_status: str = "passed"
+    source_scale: int | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +134,20 @@ def calculate_metric(
         )
 
     selected = {role: inputs[role] for role in spec.inputs}
+    non_finite = sorted(
+        role for role, item in selected.items() if not item.value.is_finite()
+    )
+    if non_finite:
+        return _empty(
+            code,
+            "invalid",
+            "NON_FINITE_INPUT:" + ",".join(non_finite),
+            now,
+            spec,
+            input_roles=tuple(spec.inputs),
+            selected=selected,
+        )
+
     compatibility_error = _compatibility_error(spec, selected)
     if compatibility_error:
         return _empty(
@@ -120,9 +160,24 @@ def calculate_metric(
             selected=selected,
         )
 
+    if (
+        spec.operation == "subtract"
+        and spec.inputs[1] == "CAPITAL_EXPENDITURE"
+        and selected[spec.inputs[1]].value < 0
+    ):
+        return _empty(
+            code,
+            "unavailable",
+            "NEGATIVE_CAPITAL_EXPENDITURE_UNSUPPORTED_SIGN",
+            now,
+            spec,
+            input_roles=tuple(spec.inputs),
+            selected=selected,
+        )
+
     warnings: list[str] = []
     numerator = selected[spec.inputs[0]].value
-    if numerator is not None and numerator < 0:
+    if numerator < 0:
         warnings.append("NEGATIVE_NUMERATOR")
 
     try:
@@ -136,19 +191,16 @@ def calculate_metric(
                     warnings.append("NEGATIVE_EQUITY")
             value = numerator / denominator
         elif spec.operation == "average_divide":
-            opening = selected[spec.inputs[1]].value
-            closing = selected[spec.inputs[2]].value
-            average = (opening + closing) / Decimal(2)
+            opening_value = selected[spec.inputs[1]].value
+            closing_value = selected[spec.inputs[2]].value
+            average = (opening_value + closing_value) / Decimal(2)
             if average == 0:
                 return _empty(code, "unavailable", "ZERO_AVERAGE_BALANCE", now, spec, input_roles=tuple(spec.inputs), selected=selected)
             if average < 0:
                 warnings.append("NEGATIVE_AVERAGE_BALANCE")
             value = numerator / average
         elif spec.operation == "subtract":
-            deduction = selected[spec.inputs[1]].value
-            if deduction is not None and deduction < 0:
-                warnings.append("NEGATIVE_CAPITAL_EXPENDITURE")
-            value = numerator - deduction
+            value = numerator - selected[spec.inputs[1]].value
         else:
             return _empty(code, "invalid", "UNSUPPORTED_OPERATION", now, spec, input_roles=tuple(spec.inputs), selected=selected)
     except (DivisionByZero, InvalidOperation, TypeError) as exc:
@@ -187,6 +239,12 @@ def persist_metric(
     reporting_basis: str | None = None,
     currency: str | None = None,
 ) -> FinancialMetric:
+    definition = db.get(MetricDefinition, definition_id)
+    if definition is None:
+        raise ValueError("Unknown metric definition")
+    if definition.version != computation.formula_version:
+        raise ValueError("Metric definition version mismatch")
+
     previous = db.scalars(
         select(FinancialMetric).where(
             FinancialMetric.company_id == company_id,
@@ -199,6 +257,8 @@ def persist_metric(
         row.is_current = False
 
     baseline = next(iter(inputs.values()), None)
+    currencies = sorted({item.currency for item in inputs.values() if item.currency})
+    resolved_currency = currency or (currencies[0] if len(currencies) == 1 else None)
     metric = FinancialMetric(
         company_id=company_id,
         period_id=period_id,
@@ -212,7 +272,7 @@ def persist_metric(
         is_current=True,
         computed_at=computation.calculated_at,
         reporting_basis=reporting_basis or (baseline.reporting_basis if baseline else "unknown"),
-        currency=currency or (baseline.currency if baseline else None),
+        currency=resolved_currency,
         calculation_status=computation.status,
         unavailable_reason=computation.reason,
         validation_warnings=list(computation.warnings),
@@ -250,12 +310,22 @@ def _compatibility_error(spec: MetricSpec, inputs: dict[str, MetricInput]) -> st
         return "CURRENCY_MISMATCH"
     if len({item.unit for item in inputs.values()}) > 1:
         return "UNIT_MISMATCH"
-    if len({item.fiscal_year for item in inputs.values()}) > 1:
-        return "FISCAL_YEAR_MISMATCH"
+    if len({item.source_scale for item in inputs.values()}) > 1:
+        return "SOURCE_SCALE_MISMATCH"
     if any(item.validation_status in {"failed", "pending"} for item in inputs.values()):
         return "INPUT_NOT_VALIDATED"
+    for role, item in selected_with_role(inputs):
+        expected_kind = (
+            "instant" if role in INSTANT_INPUT_ROLES else "duration" if role in DURATION_INPUT_ROLES else None
+        )
+        if expected_kind is not None and item.period_kind != expected_kind:
+            return "ROLE_PERIOD_KIND_MISMATCH"
 
     if spec.operation in {"divide", "subtract"}:
+        if len({item.fiscal_year for item in inputs.values()}) > 1:
+            return "FISCAL_YEAR_MISMATCH"
+        if len({item.period_kind for item in inputs.values()}) > 1:
+            return "INCOMPATIBLE_PERIOD_KIND"
         if len({item.period_id for item in inputs.values()}) > 1:
             return "INCOMPATIBLE_PERIOD"
         if len({item.duration_kind for item in inputs.values()}) > 1:
@@ -265,15 +335,29 @@ def _compatibility_error(spec: MetricSpec, inputs: dict[str, MetricInput]) -> st
     numerator = inputs[spec.inputs[0]]
     opening = inputs[spec.inputs[1]]
     closing = inputs[spec.inputs[2]]
+    if numerator.fiscal_year != closing.fiscal_year:
+        return "FISCAL_YEAR_MISMATCH"
+    if opening.fiscal_year > numerator.fiscal_year:
+        return "FISCAL_YEAR_MISMATCH"
     if numerator.period_kind != "duration":
         return "NUMERATOR_PERIOD_MISMATCH"
     if opening.period_kind != "instant" or closing.period_kind != "instant":
         return "AVERAGE_BALANCE_PERIOD_MISMATCH"
+    if numerator.period_start is None or numerator.period_end is None:
+        return "MISSING_NUMERATOR_PERIOD"
     if opening.period_end is None or closing.period_end is None:
         return "MISSING_AVERAGE_BALANCE_DATES"
+    if opening.period_end > numerator.period_start:
+        return "INVALID_OPENING_WINDOW"
+    if numerator.period_end > closing.period_end:
+        return "INVALID_CLOSING_WINDOW"
     if opening.period_end >= closing.period_end:
         return "INVALID_AVERAGE_BALANCE_ORDER"
     return None
+
+
+def selected_with_role(inputs: dict[str, MetricInput]) -> tuple[tuple[str, MetricInput], ...]:
+    return tuple(sorted(inputs.items()))
 
 
 def _empty(

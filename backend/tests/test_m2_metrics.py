@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.metrics.calculator import MetricInput, calculate_metric
+from app.metrics.calculator import INSTANT_INPUT_ROLES, MetricInput, calculate_metric
 from app.metrics.definitions import FORMULA_VERSION
 
 
@@ -12,29 +12,33 @@ def _input(
     value: str,
     *,
     period_id: int = 1,
-    period_kind: str = "duration",
-    duration_kind: str = "full_year",
+    period_kind: str | None = None,
+    duration_kind: str | None = None,
     period_end: date | None = date(2025, 12, 31),
     basis: str = "consolidated",
     currency: str | None = "IDR",
     unit: str = "IDR",
     fact_id: int = 1,
+    source_scale: int = 0,
 ) -> MetricInput:
+    resolved_kind = period_kind or ("instant" if role in INSTANT_INPUT_ROLES else "duration")
+    resolved_duration = duration_kind or ("not_applicable" if resolved_kind == "instant" else "full_year")
     return MetricInput(
         role=role,
         value=Decimal(value),
         company_id=1,
         period_id=period_id,
         fiscal_year=2025,
-        period_start=date(2025, 1, 1) if period_kind == "duration" else None,
+        period_start=date(2025, 1, 1) if resolved_kind == "duration" else None,
         period_end=period_end,
-        period_kind=period_kind,
-        duration_kind=duration_kind,
+        period_kind=resolved_kind,
+        duration_kind=resolved_duration,
         reporting_basis=basis,
         currency=currency,
         unit=unit,
         fact_id=fact_id,
         document_version=1,
+        source_scale=source_scale,
     )
 
 
@@ -42,10 +46,10 @@ def _averaged(numerator: str, opening: str, closing: str) -> dict[str, MetricInp
     return {
         "NET_INCOME": _input("NET_INCOME", numerator, fact_id=1),
         "OPENING_TOTAL_ASSETS": _input(
-            "OPENING_TOTAL_ASSETS", opening, period_id=2, period_kind="instant", duration_kind="not_applicable", period_end=date(2025, 1, 1), fact_id=2
+            "OPENING_TOTAL_ASSETS", opening, period_id=2, period_end=date(2025, 1, 1), fact_id=2
         ),
         "CLOSING_TOTAL_ASSETS": _input(
-            "CLOSING_TOTAL_ASSETS", closing, period_id=3, period_kind="instant", duration_kind="not_applicable", period_end=date(2025, 12, 31), fact_id=3
+            "CLOSING_TOTAL_ASSETS", closing, period_id=3, period_end=date(2025, 12, 31), fact_id=3
         ),
     }
 
@@ -53,10 +57,10 @@ def _averaged(numerator: str, opening: str, closing: str) -> dict[str, MetricInp
 def test_average_balance_formulas():
     inputs = _averaged("20", "100", "300")
     inputs["OPENING_EQUITY"] = _input(
-        "OPENING_EQUITY", "80", period_id=4, period_kind="instant", duration_kind="not_applicable", period_end=date(2025, 1, 1), fact_id=4
+        "OPENING_EQUITY", "80", period_id=4, period_end=date(2025, 1, 1), fact_id=4
     )
     inputs["CLOSING_EQUITY"] = _input(
-        "CLOSING_EQUITY", "120", period_id=5, period_kind="instant", duration_kind="not_applicable", period_end=date(2025, 12, 31), fact_id=5
+        "CLOSING_EQUITY", "120", period_id=5, period_end=date(2025, 12, 31), fact_id=5
     )
     assert calculate_metric("ROA", inputs).value == Decimal("0.1")
     roe = calculate_metric("ROE", inputs)
@@ -95,8 +99,8 @@ def test_binary_ratio_formulas(code, values, expected):
 def test_inventory_turnover_and_free_cash_flow():
     inventory = {
         "COST_OF_GOODS_SOLD": _input("COST_OF_GOODS_SOLD", "50", fact_id=1),
-        "OPENING_INVENTORY": _input("OPENING_INVENTORY", "20", period_id=2, period_kind="instant", duration_kind="not_applicable", period_end=date(2025, 1, 1), fact_id=2),
-        "CLOSING_INVENTORY": _input("CLOSING_INVENTORY", "30", period_id=3, period_kind="instant", duration_kind="not_applicable", period_end=date(2025, 12, 31), fact_id=3),
+        "OPENING_INVENTORY": _input("OPENING_INVENTORY", "20", period_id=2, period_end=date(2025, 1, 1), fact_id=2),
+        "CLOSING_INVENTORY": _input("CLOSING_INVENTORY", "30", period_id=3, period_end=date(2025, 12, 31), fact_id=3),
     }
     assert calculate_metric("INVENTORY_TURNOVER", inventory).value == Decimal("2")
 
@@ -203,3 +207,63 @@ def test_calculation_timestamp_is_recorded():
         calculated_at=at,
     )
     assert result.calculated_at == at
+
+
+def test_non_finite_input_is_rejected():
+    result = calculate_metric(
+        "NET_PROFIT_MARGIN",
+        {
+            "NET_INCOME": _input("NET_INCOME", "NaN", fact_id=1),
+            "REVENUE": _input("REVENUE", "100", fact_id=2),
+        },
+    )
+    assert result.status == "invalid"
+    assert result.reason == "NON_FINITE_INPUT:NET_INCOME"
+    assert result.value is None
+
+
+def test_source_scale_mismatch_is_invalid():
+    result = calculate_metric(
+        "NET_PROFIT_MARGIN",
+        {
+            "NET_INCOME": _input("NET_INCOME", "20", fact_id=1, source_scale=0),
+            "REVENUE": _input("REVENUE", "100", fact_id=2, source_scale=3),
+        },
+    )
+    assert result.status == "invalid"
+    assert result.reason == "SOURCE_SCALE_MISMATCH"
+
+
+def test_role_period_kind_mismatch_is_invalid():
+    result = calculate_metric(
+        "CURRENT_RATIO",
+        {
+            "CURRENT_ASSETS": _input("CURRENT_ASSETS", "200", period_kind="duration", fact_id=1),
+            "CURRENT_LIABILITIES": _input("CURRENT_LIABILITIES", "100", fact_id=2),
+        },
+    )
+    assert result.status == "invalid"
+    assert result.reason == "ROLE_PERIOD_KIND_MISMATCH"
+
+
+def test_negative_capex_uses_explicit_positive_sign_convention():
+    result = calculate_metric(
+        "FREE_CASH_FLOW",
+        {
+            "OPERATING_CASH_FLOW": _input("OPERATING_CASH_FLOW", "80", fact_id=1),
+            "CAPITAL_EXPENDITURE": _input("CAPITAL_EXPENDITURE", "-30", fact_id=2),
+        },
+    )
+    assert result.status == "unavailable"
+    assert result.reason == "NEGATIVE_CAPITAL_EXPENDITURE_UNSUPPORTED_SIGN"
+    assert result.value is None
+
+
+def test_average_window_mismatch_is_invalid():
+    inputs = _averaged("20", "100", "300")
+    inputs["OPENING_TOTAL_ASSETS"] = _input(
+        "OPENING_TOTAL_ASSETS", "100", period_id=2, period_end=date(2025, 2, 1), fact_id=2
+    )
+    result = calculate_metric("ROA", inputs)
+    assert result.status == "invalid"
+    assert result.reason == "INVALID_OPENING_WINDOW"

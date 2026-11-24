@@ -16,8 +16,8 @@
    - Values are normalized to absolute IDR; EPS remains `IDRPerShares` with no currency.
 
 3. **Account normalization**
-   - `ensure_reference_data` seeds standard accounts and approved taxonomy rules.
-   - `AccountNormalizer.resolve` prefers exact taxonomy/concept evidence, then reviewed rule name/industry/statement evidence.
+   - `ensure_reference_data` seeds standard accounts, approved taxonomy rules, and reviewed source-name rules for unambiguous captions.
+   - `AccountNormalizer.resolve` prefers exact taxonomy/concept evidence, then reviewed rule name/industry/statement evidence; ambiguous captions such as generic quick assets or total debt remain `review_required`.
    - Unknown or ambiguous accounts receive `unmapped` or `review_required` and cannot publish automatically.
    - Source account names are preserved on every mapping row.
    - Current facts created before M2 are idempotently backfilled with mapping references, period kind, duration kind, and context details without changing values.
@@ -40,8 +40,10 @@
 
 7. **Metric calculation**
    - `metric_definitions` are seeded from versioned `m2-v1` specs.
+   - Input collection selects duration and instant facts by standard role, reporting date, opening/closing boundary, basis, and approved mapping; duplicated candidates are resolved deterministically by period alignment, document version, fact version, and fact ID.
    - The calculator records inputs, formula definition, formula version, warnings, calculation status, and unavailable reasons.
-   - Zero denominators, missing inputs, negative balances, incompatible periods, mixed basis, and mixed units are explicit outcomes.
+   - Non-finite values, scale/role-kind mismatches, zero denominators, missing inputs, negative balances, incompatible periods, mixed basis, and mixed units are explicit outcomes.
+   - Free cash flow uses positive capital expenditure; negative-source sign conventions require an auditable normalization or return `NEGATIVE_CAPITAL_EXPENDITURE_UNSUPPORTED_SIGN`.
    - Distinct leverage definitions prevent interest-bearing debt from being conflated with total liabilities.
 
 8. **Validation and review**

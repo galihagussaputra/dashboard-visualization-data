@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -6,8 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
-    FinancialAccount,
-    FinancialDocument,
     FinancialFact,
     FinancialMetric,
     FinancialPeriod,
@@ -20,6 +19,31 @@ from app.normalization.accounts import backfill_fact_mappings
 
 from .calculator import MetricInput, calculate_metric, ensure_metric_definitions, persist_metric
 from .definitions import METRIC_SPECS
+
+DURATION_ROLES_BY_STANDARD = {
+    "NET_INCOME": "NET_INCOME",
+    "REVENUE": "REVENUE",
+    "COST_OF_GOODS_SOLD": "COST_OF_GOODS_SOLD",
+    "OPERATING_CASH_FLOW": "OPERATING_CASH_FLOW",
+    "CAPITAL_EXPENDITURE": "CAPITAL_EXPENDITURE",
+}
+
+INSTANT_ROLES_BY_STANDARD = {
+    "TOTAL_ASSETS": ("TOTAL_ASSETS", "CLOSING_TOTAL_ASSETS"),
+    "TOTAL_EQUITY": ("TOTAL_EQUITY", "CLOSING_EQUITY"),
+    "INVENTORY": ("INVENTORY", "CLOSING_INVENTORY"),
+    "CURRENT_ASSETS": ("CURRENT_ASSETS",),
+    "CURRENT_LIABILITIES": ("CURRENT_LIABILITIES",),
+    "QUICK_ASSETS": ("QUICK_ASSETS",),
+    "TOTAL_DEBT": ("TOTAL_DEBT",),
+    "TOTAL_LIABILITIES": ("TOTAL_LIABILITIES",),
+}
+
+OPENING_ROLES_BY_STANDARD = {
+    "TOTAL_ASSETS": "OPENING_TOTAL_ASSETS",
+    "TOTAL_EQUITY": "OPENING_EQUITY",
+    "INVENTORY": "OPENING_INVENTORY",
+}
 
 
 def recalculate_metrics(
@@ -111,55 +135,148 @@ def current_metrics(
 
 
 def _collect_inputs(db: Session, *, company_id: int, period_id: int, basis: str) -> dict[str, MetricInput]:
-    rows = db.execute(
-        select(
-            FinancialFact,
-            FinancialAccount,
-            FinancialPeriod,
-            FinancialDocument,
-            StandardAccount.code,
+    period = db.get(FinancialPeriod, period_id)
+    if period is None:
+        return {}
+    current_rows = _fact_rows(
+        db,
+        company_id=company_id,
+        basis=basis,
+        period_id=period_id,
+    )
+    all_rows = _fact_rows(db, company_id=company_id, basis=basis)
+    inputs: dict[str, MetricInput] = {}
+
+    for standard_code, role in DURATION_ROLES_BY_STANDARD.items():
+        selected = _select_duration(current_rows, standard_code, period)
+        if selected is not None:
+            inputs[role] = replace(selected, role=role)
+
+    closing_date = period.instant_date
+    for standard_code, roles in INSTANT_ROLES_BY_STANDARD.items():
+        selected = _select_instant(
+            current_rows,
+            standard_code,
+            closing_date,
+            lower_bound=period.start_date,
         )
-        .join(FinancialAccount, FinancialFact.account_id == FinancialAccount.id)
+        if selected is None:
+            continue
+        for role in roles:
+            inputs[role] = replace(selected, role=role)
+
+    excluded_ids = {
+        value.fact_id
+        for role, value in inputs.items()
+        if role in {"CLOSING_TOTAL_ASSETS", "CLOSING_EQUITY", "CLOSING_INVENTORY"}
+        and value.fact_id is not None
+    }
+    for standard_code, role in OPENING_ROLES_BY_STANDARD.items():
+        selected = _select_instant(
+            all_rows,
+            standard_code,
+            period.start_date,
+            lower_bound=None,
+            excluded_ids=excluded_ids,
+        )
+        if selected is not None:
+            inputs[role] = replace(selected, role=role)
+    return inputs
+
+
+def _fact_rows(
+    db: Session,
+    *,
+    company_id: int,
+    basis: str,
+    period_id: int | None = None,
+) -> list[tuple[FinancialFact, FinancialPeriod, str]]:
+    statement = (
+        select(FinancialFact, FinancialPeriod, StandardAccount.code)
         .join(FinancialPeriod, FinancialFact.period_id == FinancialPeriod.id)
-        .join(FinancialDocument, FinancialFact.document_id == FinancialDocument.id)
         .join(SourceAccountMapping, FinancialFact.mapping_id == SourceAccountMapping.id)
         .join(StandardAccount, SourceAccountMapping.standard_account_id == StandardAccount.id)
         .where(
             FinancialFact.company_id == company_id,
-            FinancialFact.period_id == period_id,
             FinancialFact.reporting_basis == basis,
             FinancialFact.is_current.is_(True),
+            FinancialFact.mapping_id.is_not(None),
+            SourceAccountMapping.status == "approved",
+            SourceAccountMapping.is_current.is_(True),
         )
-    ).all()
+    )
+    if period_id is not None:
+        statement = statement.where(FinancialFact.period_id == period_id)
+    return db.execute(statement).all()
 
-    inputs: dict[str, MetricInput] = {}
-    for fact, account, period, document, standard_code in rows:
-        metric = _to_input(fact, period)
-        if fact.period_kind == "duration":
-            inputs.setdefault(standard_code, metric)
-        elif standard_code in {"TOTAL_ASSETS", "TOTAL_EQUITY", "INVENTORY"}:
-            suffix = {
-                "TOTAL_ASSETS": "TOTAL_ASSETS",
-                "TOTAL_EQUITY": "EQUITY",
-                "INVENTORY": "INVENTORY",
-            }[standard_code]
-            inputs.setdefault(standard_code, metric)
-            inputs.setdefault("CLOSING_TOTAL_ASSETS" if standard_code == "TOTAL_ASSETS" else f"CLOSING_{suffix}", metric)
-        del account, document
 
-    prior_opening = {
-        "TOTAL_ASSETS": "OPENING_TOTAL_ASSETS",
-        "TOTAL_EQUITY": "OPENING_EQUITY",
-        "INVENTORY": "OPENING_INVENTORY",
-    }
-    for standard_code, role in prior_opening.items():
-        opening = _prior_period_input(db, company_id, period_id, basis, standard_code)
-        if opening is not None:
-            inputs[role] = opening
-    return inputs
+def _select_duration(
+    rows: list[tuple[FinancialFact, FinancialPeriod, str]],
+    standard_code: str,
+    period: FinancialPeriod,
+) -> MetricInput | None:
+    candidates = [
+        (fact, fact_period)
+        for fact, fact_period, code in rows
+        if code == standard_code and fact.period_kind == "duration"
+    ]
+    if not candidates:
+        return None
+    selected = min(candidates, key=lambda row: _duration_rank(row[0], period))
+    return _to_input(selected[0], selected[1])
+
+
+def _select_instant(
+    rows: list[tuple[FinancialFact, FinancialPeriod, str]],
+    standard_code: str,
+    target_date: date,
+    *,
+    lower_bound: date | None,
+    excluded_ids: set[int] | None = None,
+) -> MetricInput | None:
+    candidates: list[tuple[FinancialFact, FinancialPeriod]] = []
+    for fact, fact_period, code in rows:
+        if code != standard_code or fact.period_kind != "instant":
+            continue
+        if excluded_ids and fact.id in excluded_ids:
+            continue
+        instant_date = _instant_date(fact, fact_period)
+        if instant_date is None or instant_date > target_date:
+            continue
+        if lower_bound is not None and instant_date < lower_bound:
+            continue
+        candidates.append((fact, fact_period))
+    if not candidates:
+        return None
+    selected = min(candidates, key=lambda row: _instant_rank(row[0], row[1], target_date))
+    return _to_input(selected[0], selected[1])
+
+
+def _duration_rank(fact: FinancialFact, period: FinancialPeriod) -> tuple[int, int, int, int]:
+    exact = fact.context_start_date == period.start_date and fact.context_end_date == period.end_date
+    return (
+        0 if exact else 1,
+        -fact.document_version,
+        -fact.fact_version,
+        -fact.id,
+    )
+
+
+def _instant_rank(fact: FinancialFact, period: FinancialPeriod, target_date: date) -> tuple[int, int, int, int]:
+    instant_date = _instant_date(fact, period) or target_date
+    distance = (target_date - instant_date).days
+    return distance, -fact.document_version, -fact.fact_version, -fact.id
+
+
+def _instant_date(fact: FinancialFact, period: FinancialPeriod) -> date | None:
+    return fact.context_instant_date or period.instant_date
 
 
 def _to_input(fact: FinancialFact, period: FinancialPeriod) -> MetricInput:
+    if fact.period_kind == "instant":
+        period_end = _instant_date(fact, period)
+    else:
+        period_end = fact.context_end_date or period.end_date
     return MetricInput(
         role="",
         value=Decimal(str(fact.value_normalized)),
@@ -167,7 +284,7 @@ def _to_input(fact: FinancialFact, period: FinancialPeriod) -> MetricInput:
         period_id=fact.period_id,
         fiscal_year=period.fiscal_year,
         period_start=fact.context_start_date or period.start_date,
-        period_end=fact.context_end_date or fact.context_instant_date or period.end_date,
+        period_end=period_end,
         period_kind=fact.period_kind,
         duration_kind=fact.duration_kind,
         reporting_basis=fact.reporting_basis,
@@ -176,40 +293,5 @@ def _to_input(fact: FinancialFact, period: FinancialPeriod) -> MetricInput:
         fact_id=fact.id,
         document_version=fact.document_version,
         validation_status=fact.validation_status,
+        source_scale=fact.source_scale,
     )
-
-
-def _prior_period_input(
-    db: Session,
-    company_id: int,
-    period_id: int,
-    basis: str,
-    standard_code: str,
-) -> MetricInput | None:
-    period = db.get(FinancialPeriod, period_id)
-    if period is None:
-        return None
-    previous = db.scalars(
-        select(FinancialPeriod).where(
-            FinancialPeriod.company_id == company_id,
-            FinancialPeriod.fiscal_year == period.fiscal_year - 1,
-        )
-    ).first()
-    if previous is None:
-        return None
-    fact = db.scalars(
-        select(FinancialFact)
-        .join(SourceAccountMapping, FinancialFact.mapping_id == SourceAccountMapping.id)
-        .join(StandardAccount, SourceAccountMapping.standard_account_id == StandardAccount.id)
-        .where(
-            FinancialFact.company_id == company_id,
-            FinancialFact.period_id == previous.id,
-            FinancialFact.reporting_basis == basis,
-            FinancialFact.is_current.is_(True),
-            FinancialFact.period_kind == "instant",
-            StandardAccount.code == standard_code,
-        )
-    ).first()
-    if fact is None:
-        return None
-    return _to_input(fact, previous)

@@ -73,6 +73,20 @@ CONCEPT_INDUSTRY = {
 TAXONOMY_CODE = "idx-taxonomy-2020"
 RULE_VERSION = "m2-v1"
 
+NAME_RULE_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {"rule_code": "ACC-NAME-TOTAL_REVENUE", "source_name": "Total revenue", "standard_code": "REVENUE", "statement_type": "income_statement", "confidence": APPROVED_CONFIDENCE, "status": "approved", "evidence": "Exact income-statement caption for metric revenue; industry-specific rules take precedence when present."},
+    {"rule_code": "ACC-NAME-TOTAL_CURRENT_ASSETS", "source_name": "Total current assets", "standard_code": "CURRENT_ASSETS", "statement_type": "balance_sheet", "confidence": APPROVED_CONFIDENCE, "status": "approved", "evidence": "Exact balance-sheet caption for current assets."},
+    {"rule_code": "ACC-NAME-TOTAL_CURRENT_LIABILITIES", "source_name": "Total current liabilities", "standard_code": "CURRENT_LIABILITIES", "statement_type": "balance_sheet", "confidence": APPROVED_CONFIDENCE, "status": "approved", "evidence": "Exact balance-sheet caption for current liabilities."},
+    {"rule_code": "ACC-NAME-TOTAL_INVENTORIES", "source_name": "Total inventories", "standard_code": "INVENTORY", "statement_type": "balance_sheet", "confidence": APPROVED_CONFIDENCE, "status": "approved", "evidence": "Exact balance-sheet caption for inventories."},
+    {"rule_code": "ACC-NAME-TOTAL_INTEREST_BEARING_DEBT", "source_name": "Total interest-bearing debt", "standard_code": "TOTAL_DEBT", "statement_type": "balance_sheet", "confidence": APPROVED_CONFIDENCE, "status": "approved", "evidence": "Exact caption for interest-bearing borrowings; distinct from total liabilities."},
+    {"rule_code": "ACC-NAME-COST_OF_GOODS_SOLD", "source_name": "Cost of goods sold", "standard_code": "COST_OF_GOODS_SOLD", "statement_type": "income_statement", "confidence": APPROVED_CONFIDENCE, "status": "approved", "evidence": "Exact income-statement caption for cost of inventory sold."},
+    {"rule_code": "ACC-NAME-CAPITAL_EXPENDITURE", "source_name": "Capital expenditure", "standard_code": "CAPITAL_EXPENDITURE", "statement_type": "cash_flow", "confidence": APPROVED_CONFIDENCE, "status": "approved", "evidence": "Exact caption for positive cash outflow used by m2-v1 free cash flow."},
+    {"rule_code": "ACC-NAME-QUICK_ASSETS_DEFINED", "source_name": "Quick assets (current assets less inventory and prepaid items)", "standard_code": "QUICK_ASSETS", "statement_type": "balance_sheet", "confidence": APPROVED_CONFIDENCE, "status": "approved", "evidence": "Exact caption explicitly states the m2-v1 quick-assets exclusions."},
+    {"rule_code": "ACC-NAME-QUICK_ASSETS", "source_name": "Quick assets", "standard_code": "QUICK_ASSETS", "statement_type": "balance_sheet", "confidence": Decimal("0.8500"), "status": "review_required", "evidence": "Quick-assets definition varies by filer; reviewer must confirm exclusions."},
+    {"rule_code": "ACC-NAME-TOTAL_DEBT", "source_name": "Total debt", "standard_code": "TOTAL_DEBT", "statement_type": "balance_sheet", "confidence": Decimal("0.8000"), "status": "review_required", "evidence": "Caption may include non-interest-bearing obligations; reviewer must confirm scope."},
+    {"rule_code": "ACC-NAME-PPE_PURCHASES", "source_name": "Purchases of property, plant and equipment", "standard_code": "CAPITAL_EXPENDITURE", "statement_type": "cash_flow", "confidence": Decimal("0.8000"), "status": "review_required", "evidence": "Cash-flow captions frequently use a negative sign; reviewer must confirm positive convention."},
+)
+
 
 @dataclass(frozen=True)
 class MappingResolution:
@@ -134,6 +148,32 @@ def ensure_reference_data(db: Session) -> dict[str, int]:
                 confidence=APPROVED_CONFIDENCE,
                 status="approved",
                 evidence=f"Exact IDX taxonomy concept {spec.concept} in {spec.statement_type}",
+                approved_at=None,
+                is_active=True,
+            )
+        )
+    for definition in NAME_RULE_DEFINITIONS:
+        exists = db.scalars(
+            select(AccountMappingRule).where(
+                AccountMappingRule.rule_code == definition["rule_code"],
+                AccountMappingRule.version == RULE_VERSION,
+            )
+        ).first()
+        if exists is not None:
+            continue
+        db.add(
+            AccountMappingRule(
+                rule_code=definition["rule_code"],
+                version=RULE_VERSION,
+                source_taxonomy_code=TAXONOMY_CODE,
+                source_concept_qname=None,
+                industry=None,
+                statement_type=definition["statement_type"],
+                source_name=definition["source_name"],
+                standard_account_id=standard_ids[definition["standard_code"]],
+                confidence=definition["confidence"],
+                status=definition["status"],
+                evidence=definition["evidence"],
                 approved_at=None,
                 is_active=True,
             )
